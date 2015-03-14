@@ -53,6 +53,12 @@ func (iter *sparseReader) Peek() uint32 {
 	return v32
 }
 
+func (iter *sparseReader) Next() uint32 {
+	v := iter.Peek()
+	iter.Advance()
+	return v
+}
+
 func (iter *sparseReader) Done() bool {
 	return iter.idx >= len(iter.data)
 }
@@ -174,5 +180,5 @@ func (h *HLLPP) flushTmpSet() {
 
 	h.data = writer.Bytes()
 	h.sparseLength = writer.Len()
-	h.tmpSet = h.tmpSet[0:0]
+	h.tmpSet = make([]uint32, 0)
 }

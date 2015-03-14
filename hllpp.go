@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash"
 	"math"
+	"sort"
 )
 
 // HLLPP represents a single HyperLogLog++ estimator. Create one via New().
@@ -35,6 +36,11 @@ type HLLPP struct {
 	mp uint32
 
 	hasher hash.Hash64
+}
+
+// Approximate size in bytes of h (used for testing).
+func (h *HLLPP) memSize() int {
+	return cap(h.data) + 4*cap(h.tmpSet) + 4 + 1 + 4 + 1 + 4 + 4
 }
 
 // New creates a HyperLogLog++ estimator with p=14, p'=25, and sha1
@@ -119,9 +125,101 @@ func (h *HLLPP) Add(v []byte) {
 		// is tmpSet >= 1/4 of memory limit?
 		if 4*uint32(len(h.tmpSet))*8 >= 6*h.m/4 {
 			h.flushTmpSet()
+
+			// is sparse data bigger than dense data would be?
+			if uint32(len(h.data))*8 >= 6*h.m {
+				h.toNormal()
+			}
 		}
 	} else {
+		idx := uint32(sliceBits64(x, 63, 64-h.p))
+		rho := rho(x<<h.p | 1<<(h.p-1))
 
+		if rho > getRegister(h.data, 6, idx) {
+			setRegister(h.data, 6, idx, rho)
+		}
+	}
+}
+
+func (h *HLLPP) toNormal() {
+	size := h.m * 6 / 8
+	if h.m*6%8 > 0 {
+		size++
+	}
+
+	newData := make([]byte, size)
+
+	reader := newSparseReader(h.data)
+	for !reader.Done() {
+		idx, rho := h.decodeHash(reader.Next(), h.p)
+		if rho > getRegister(newData, 6, idx) {
+			setRegister(newData, 6, idx, rho)
+		}
+	}
+
+	h.data = newData
+	h.tmpSet = nil
+	h.sparse = false
+}
+
+// create a mask of numOnes 1's, shifted left shift bits
+func mask(numOnes, shift uint32) uint32 {
+	return ((1 << numOnes) - 1) << shift
+}
+
+func setRegister(data []byte, bitsPerRegister, idx uint32, rho uint8) {
+	bitIdx := idx * bitsPerRegister
+	byteOffset := bitIdx / 8
+	bitOffset := bitIdx % 8
+
+	if 8-bitOffset >= bitsPerRegister {
+		// can all fit in first byte
+
+		// clear existing register value
+		data[byteOffset] &= ^byte(mask(bitsPerRegister, 8-bitsPerRegister-bitOffset))
+		data[byteOffset] |= rho << (8 - bitsPerRegister - bitOffset)
+	} else {
+		// spread over two bytes
+
+		numBitsInFirstByte := bitsPerRegister - (8 - bitOffset)
+
+		data[byteOffset] &= ^byte(mask(8-bitOffset, 0))
+		data[byteOffset] |= rho >> numBitsInFirstByte
+
+		data[byteOffset+1] &= ^byte(mask(numBitsInFirstByte, 8-numBitsInFirstByte))
+		data[byteOffset+1] |= rho << (8 - numBitsInFirstByte)
+	}
+}
+
+func getRegister(data []byte, bitsPerRegister, idx uint32) uint8 {
+	bitIdx := idx * bitsPerRegister
+	byteOffset := bitIdx / 8
+	bitOffset := bitIdx % 8
+
+	if 8-bitOffset >= bitsPerRegister {
+		// all fit in first byte
+		return (data[byteOffset] >> (8 - bitOffset - bitsPerRegister)) & byte(mask(bitsPerRegister, 0))
+	} else {
+		// spread over two bytes
+
+		numBitsInFirstByte := bitsPerRegister - (8 - bitOffset)
+
+		rho := data[byteOffset] << numBitsInFirstByte
+		rho |= data[byteOffset+1] >> (8 - numBitsInFirstByte)
+		return rho & byte(mask(bitsPerRegister, 0))
+	}
+}
+
+func alpha(m uint32) float64 {
+	switch m {
+	case 16:
+		return 0.673
+	case 32:
+		return 0.697
+	case 64:
+		return 0.709
+	default:
+		return 0.7213 / (1 + 1.079/float64(m))
 	}
 }
 
@@ -132,7 +230,51 @@ func (h *HLLPP) Count() uint64 {
 		return linearCounting(h.mp, h.mp-h.sparseLength)
 	}
 
-	return 0
+	var (
+		est      float64
+		numZeros uint32
+	)
+	for i := uint32(0); i < h.m; i++ {
+		reg := getRegister(h.data, 6, i)
+		est += 1.0 / float64(uint64(1)<<reg)
+		if reg == 0 {
+			numZeros++
+		}
+	}
+
+	if numZeros > 0 {
+		lc := linearCounting(h.m, numZeros)
+		if lc < threshold[h.p-4] {
+			return lc
+		}
+	}
+
+	est = alpha(h.m) * float64(h.m) * float64(h.m) / est
+
+	if est <= float64(h.m*5) {
+		est -= h.estimateBias(est)
+	}
+
+	return uint64(est + 0.5)
+}
+
+func (h *HLLPP) estimateBias(e float64) float64 {
+	estimates := rawEstimateData[h.p-4]
+	biases := biasData[h.p-4]
+
+	index := sort.SearchFloat64s(estimates, e)
+
+	if index == 0 {
+		return biases[0]
+	} else if index == len(estimates) {
+		return biases[len(biases)-1]
+	}
+
+	e1, e2 := estimates[index-1], estimates[index]
+	b1, b2 := biases[index-1], biases[index]
+
+	r := (e - e1) / (e2 - e1)
+	return b1*(1-r) + b2*r
 }
 
 func linearCounting(m, v uint32) uint64 {
@@ -141,7 +283,7 @@ func linearCounting(m, v uint32) uint64 {
 
 func (h *HLLPP) encodeHash(x uint64) uint32 {
 	if sliceBits64(x, 64-h.p, 64-h.pp) == 0 {
-		numZeros := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | mask(h.pp, 0))
+		numZeros := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | uint64(mask(uint32(h.pp), 0)))
 		return uint32((sliceBits64(x, 63, 64-h.pp) << 7) | uint64(numZeros<<1) | 1)
 	} else {
 		return uint32(sliceBits64(x, 63, 64-h.pp) << 1)
@@ -154,7 +296,7 @@ func (h *HLLPP) decodeHash(k uint32, p uint8) (_ uint32, r uint8) {
 	if k&1 > 0 {
 		r = uint8(sliceBits32(k, 6, 1)) + (h.pp - h.p)
 	} else {
-		r = rho((uint64(k) | 1) << (63 - (h.pp - h.p - 1)))
+		r = rho((uint64(k) | 1) << (64 - (h.pp + 1) + h.p))
 	}
 
 	return h.getIndex(k, p), r
@@ -169,17 +311,12 @@ func (h *HLLPP) getIndex(k uint32, p uint8) uint32 {
 	}
 }
 
-// create a mask of numOnes 1's, shifted left shift bits
-func mask(numOnes, shift uint8) uint64 {
-	return ((1 << numOnes) - 1) << shift
-}
-
-// slice out bit section [x.from..x.to]
+// slice out inclusive bit section [x.high..x.low]
 func sliceBits64(x uint64, high, low uint8) uint64 {
 	return (x << (63 - high)) >> (low + (63 - high))
 }
 
-// slice out bit section [x.from..x.to]
+// slice out inclusive bit section [x.high..x.low]
 func sliceBits32(x uint32, high, low uint8) uint32 {
 	return (x << (31 - high)) >> (low + (31 - high))
 }
