@@ -5,11 +5,14 @@ package hllpp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+var p14NormalSize = (1 << 14) * 6 / 8
 
 func intToBytes(i uint64) []byte {
 	b := make([]byte, 8)
@@ -19,10 +22,6 @@ func intToBytes(i uint64) []byte {
 
 func TestSparse(t *testing.T) {
 	h := New()
-
-	hd := New()
-	hd.toNormal()
-	denseSize := hd.memSize()
 
 	if h.Count() != 0 {
 		t.Errorf("Got %d", h.Count())
@@ -41,8 +40,9 @@ func TestSparse(t *testing.T) {
 			t.Errorf("Got %d, expected %d (error of %f)", h.Count(), count, e)
 		}
 
-		if h.memSize() > denseSize {
-			t.Errorf("Taking up more memory than dense: %d > %d", h.memSize(), int(6*h.m/8))
+		if h.memSize() > p14NormalSize+100 {
+			fmt.Println(len(h.data), cap(h.data), cap(h.tmpSet))
+			t.Errorf("Taking up more memory than dense: %d > %d", h.memSize(), p14NormalSize)
 		}
 	}
 
@@ -90,11 +90,54 @@ func TestBiasCorrection(t *testing.T) {
 	for i := uint64(1); i < 100000; i++ {
 		h.Add(intToBytes(i))
 
-		if i%100 == 0 {
+		if i%500 == 0 {
 			if e := estimateError(h.Count(), i); e > 0.015 {
 				t.Errorf("Got %d, expected %d (%f)", h.Count(), i, e)
 			}
 		}
+	}
+}
+
+func TestBitsPerRegister(t *testing.T) {
+	h := New()
+
+	for i := uint64(1); i < 100000; i++ {
+		h.Add(intToBytes(i))
+	}
+
+	if e := estimateError(h.Count(), 100000); e > 0.015 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
+	}
+
+	if uint32(len(h.data)) != 5*h.m/8 {
+		t.Errorf("Expecting 5 bits per register")
+	}
+
+	// this uint64's big-endian sha1 has rho > 31
+	h.Add(intToBytes(3357697204))
+	if e := estimateError(h.Count(), 100001); e > 0.015 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
+	}
+
+	if uint32(len(h.data)) != 6*h.m/8 {
+		t.Errorf("Expecting 6 bits per register")
+	}
+
+	// test sparse to normal transition when sparse has > 31 rho in it
+	h = New()
+
+	h.Add(intToBytes(3357697204))
+
+	for i := uint64(1); i < 100000; i++ {
+		h.Add(intToBytes(i))
+	}
+
+	if e := estimateError(h.Count(), 100001); e > 0.015 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
+	}
+
+	if uint32(len(h.data)) != 6*h.m/8 {
+		t.Errorf("Expecting 6 bits per register")
 	}
 }
 
@@ -241,6 +284,24 @@ func TestEncodeDecodeHash(t *testing.T) {
 	}
 
 	if r != 51 {
+		t.Errorf("got %d", r)
+	}
+
+	//                              p            p'
+	x = bitsToUint64("11001101 01011100 00000000 00000000 00000000 00000010 01000000 00110111")
+	e = h.encodeHash(x)
+
+	if e != bitsToUint32("11001101 01011100 00000000 0 010110 1") {
+		t.Errorf("got %s", uint32ToBits(e))
+	}
+
+	i, r = h.decodeHash(e, h.p)
+
+	if i != bitsToUint32("11001101 010111") {
+		t.Errorf("got %s", uint32ToBits(i))
+	}
+
+	if r != 33 {
 		t.Errorf("got %d", r)
 	}
 }

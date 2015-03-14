@@ -28,6 +28,9 @@ type HLLPP struct {
 	sparse       bool
 	sparseLength uint32
 
+	// how many bits we are using to store each register value
+	bitsPerRegister uint32
+
 	p uint8
 	m uint32
 
@@ -135,25 +138,40 @@ func (h *HLLPP) Add(v []byte) {
 		idx := uint32(sliceBits64(x, 63, 64-h.p))
 		rho := rho(x<<h.p | 1<<(h.p-1))
 
-		if rho > getRegister(h.data, 6, idx) {
-			setRegister(h.data, 6, idx, rho)
+		if rho > 31 && h.bitsPerRegister == 5 {
+			h.bitsPerRegister = 6
+			newData := make([]byte, h.m*h.bitsPerRegister/8)
+			for i := uint32(0); i < h.m; i++ {
+				setRegister(newData, 6, i, getRegister(h.data, 5, i))
+			}
+			h.data = newData
+		}
+
+		if rho > getRegister(h.data, h.bitsPerRegister, idx) {
+			setRegister(h.data, h.bitsPerRegister, idx, rho)
 		}
 	}
 }
 
 func (h *HLLPP) toNormal() {
-	size := h.m * 6 / 8
-	if h.m*6%8 > 0 {
-		size++
+	if h.bitsPerRegister == 0 {
+		h.bitsPerRegister = 5
 	}
 
-	newData := make([]byte, size)
+	newData := make([]byte, h.m*h.bitsPerRegister/8)
 
 	reader := newSparseReader(h.data)
 	for !reader.Done() {
 		idx, rho := h.decodeHash(reader.Next(), h.p)
-		if rho > getRegister(newData, 6, idx) {
-			setRegister(newData, 6, idx, rho)
+
+		if rho > 31 && h.bitsPerRegister == 5 {
+			h.bitsPerRegister = 6
+			h.toNormal()
+			return
+		}
+
+		if rho > getRegister(newData, h.bitsPerRegister, idx) {
+			setRegister(newData, h.bitsPerRegister, idx, rho)
 		}
 	}
 
@@ -235,7 +253,7 @@ func (h *HLLPP) Count() uint64 {
 		numZeros uint32
 	)
 	for i := uint32(0); i < h.m; i++ {
-		reg := getRegister(h.data, 6, i)
+		reg := getRegister(h.data, h.bitsPerRegister, i)
 		est += 1.0 / float64(uint64(1)<<reg)
 		if reg == 0 {
 			numZeros++
@@ -282,7 +300,7 @@ func linearCounting(m, v uint32) uint64 {
 }
 
 func (h *HLLPP) encodeHash(x uint64) uint32 {
-	if sliceBits64(x, 64-h.p, 64-h.pp) == 0 {
+	if sliceBits64(x, 63-h.p, 64-h.pp) == 0 {
 		numZeros := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | uint64(mask(uint32(h.pp), 0)))
 		return uint32((sliceBits64(x, 63, 64-h.pp) << 7) | uint64(numZeros<<1) | 1)
 	} else {
