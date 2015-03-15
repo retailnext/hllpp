@@ -24,7 +24,7 @@ Here is a diagram of the marshal format:
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |       p       |       p'      |        sparseLength...        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |       ...sparseLength         |bitsPerRegister|   Data...    |
+   |       ...sparseLength         |bitsPerRegister|    Data...    |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 */
@@ -38,8 +38,9 @@ const (
 )
 
 // Marshal serializes h into a byte slice that can be deserialized via
-// Unmarshal. If you created your HLLPP via NewWithConfig, you must
-// unmarshal using UnmarshalWithHasher.
+// Unmarshal. The data is naturally compressed, so don't bother trying
+// to compress it any more. If you created your HLLPP via NewWithConfig,
+// you must unmarshal using UnmarshalWithHasher.
 func (h *HLLPP) Marshal() []byte {
 	if h.sparse {
 		h.flushTmpSet()
@@ -83,6 +84,8 @@ func (h *HLLPP) Marshal() []byte {
 	return buf
 }
 
+// Unmarshal deserializes a byte slice returned by Marshal back into an
+// HLLPP object.
 func Unmarshal(data []byte) (*HLLPP, error) {
 	h, err := unmarshal(data, sha1.New())
 	if err != nil {
@@ -96,6 +99,9 @@ func Unmarshal(data []byte) (*HLLPP, error) {
 	return h, nil
 }
 
+// UnmarshalWithHasher deserializes a byte slice returned by Marshal back into
+// an HLLPP object with a custom hasher. You must use this method if you
+// specified a customer hasher when creating your HLLPP object.
 func UnmarshalWithHasher(data []byte, hasher hash.Hash) (*HLLPP, error) {
 	h, err := unmarshal(data, hasher)
 	if err != nil {
