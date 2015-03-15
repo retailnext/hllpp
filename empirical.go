@@ -1,5 +1,6 @@
 // Copyright (c) 2015, RetailNext, Inc.
 // All rights reserved.
+
 package hllpp
 
 // empirical data from http://goo.gl/r0EASU

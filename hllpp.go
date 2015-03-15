@@ -38,7 +38,8 @@ type HLLPP struct {
 	pp uint8
 	mp uint32
 
-	hasher hash.Hash64
+	hasher        hash.Hash64
+	defaultHasher bool
 }
 
 // Approximate size in bytes of h (used for testing).
@@ -49,11 +50,7 @@ func (h *HLLPP) memSize() int {
 // New creates a HyperLogLog++ estimator with p=14, p'=25, and sha1
 // hashing function.
 func New() *HLLPP {
-	h, _ := NewWithConfig(Config{
-		Precision:       14,
-		SparsePrecision: 25,
-		Hasher:          sha1.New(),
-	})
+	h, _ := NewWithConfig(Config{})
 	return h
 }
 
@@ -86,13 +83,23 @@ func (w *hashWrapper) Sum64() uint64 {
 
 // NewWithConfig creates a HyperLogLog++ estimator with the given Config.
 func NewWithConfig(c Config) (*HLLPP, error) {
+	if c.Precision == 0 {
+		c.Precision = 14
+	}
+
+	if c.SparsePrecision == 0 {
+		c.SparsePrecision = 25
+	}
+
+	defaultHasher := false
+	if c.Hasher == nil {
+		defaultHasher = true
+		c.Hasher = sha1.New()
+	}
+
 	p, pp := c.Precision, c.SparsePrecision
 	if p < 4 || p > 16 || pp < p || pp > 25 {
 		return nil, fmt.Errorf("invalid precision (p: %d, p': %d)", p, pp)
-	}
-
-	if c.Hasher == nil {
-		return nil, errors.New("must specify Hasher")
 	}
 
 	if c.Hasher.Size() < 8 {
@@ -107,12 +114,13 @@ func NewWithConfig(c Config) (*HLLPP, error) {
 	}
 
 	return &HLLPP{
-		p:      p,
-		pp:     pp,
-		m:      1 << p,
-		mp:     1 << pp,
-		sparse: true,
-		hasher: hasher,
+		p:             p,
+		pp:            pp,
+		m:             1 << p,
+		mp:            1 << pp,
+		sparse:        true,
+		hasher:        hasher,
+		defaultHasher: defaultHasher,
 	}, nil
 }
 

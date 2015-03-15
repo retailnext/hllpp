@@ -1,5 +1,6 @@
 // Copyright (c) 2015, RetailNext, Inc.
 // All rights reserved.
+
 package hllpp
 
 import (
@@ -180,5 +181,5 @@ func (h *HLLPP) flushTmpSet() {
 
 	h.data = writer.Bytes()
 	h.sparseLength = writer.Len()
-	h.tmpSet = make([]uint32, 0)
+	h.tmpSet = nil
 }
