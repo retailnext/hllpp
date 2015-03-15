@@ -3,32 +3,7 @@
 
 package hllpp
 
-func (h *HLLPP) toNormal() {
-	if h.bitsPerRegister == 0 {
-		h.bitsPerRegister = 5
-	}
-
-	newData := make([]byte, h.m*h.bitsPerRegister/8)
-
-	reader := newSparseReader(h.data)
-	for !reader.Done() {
-		idx, rho := h.decodeHash(reader.Next(), h.p)
-
-		if rho > 31 && h.bitsPerRegister == 5 {
-			h.bitsPerRegister = 6
-			h.toNormal()
-			return
-		}
-
-		if rho > getRegister(newData, h.bitsPerRegister, idx) {
-			setRegister(newData, h.bitsPerRegister, idx, rho)
-		}
-	}
-
-	h.data = newData
-	h.tmpSet = nil
-	h.sparse = false
-}
+import "sort"
 
 // create a mask of numOnes 1's, shifted left shift bits
 func mask(numOnes, shift uint32) uint32 {
@@ -91,4 +66,23 @@ func alpha(m uint32) float64 {
 	default:
 		return 0.7213 / (1 + 1.079/float64(m))
 	}
+}
+
+func (h *HLLPP) estimateBias(e float64) float64 {
+	estimates := rawEstimateData[h.p-4]
+	biases := biasData[h.p-4]
+
+	index := sort.SearchFloat64s(estimates, e)
+
+	if index == 0 {
+		return biases[0]
+	} else if index == len(estimates) {
+		return biases[len(biases)-1]
+	}
+
+	e1, e2 := estimates[index-1], estimates[index]
+	b1, b2 := biases[index-1], biases[index]
+
+	r := (e - e1) / (e2 - e1)
+	return b1*(1-r) + b2*r
 }

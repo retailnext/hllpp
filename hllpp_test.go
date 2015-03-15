@@ -99,6 +99,99 @@ func TestBiasCorrection(t *testing.T) {
 	}
 }
 
+func TestMerge(t *testing.T) {
+	h := New()
+	other := New()
+
+	err := h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if h.Count() != 0 {
+		t.Errorf("got %d", h.Count())
+	}
+
+	// both sparse
+	for i := uint64(0); i < 2000; i++ {
+		other.Add(intToBytes(i))
+		if i < 1000 {
+			h.Add(intToBytes(i))
+		}
+	}
+
+	err = h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := estimateError(h.Count(), 2000); e > 0.01 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 2000, e)
+	}
+
+	// we are dense, other is sparse
+	for i := uint64(0); i < 100000; i++ {
+		h.Add(intToBytes(i))
+		if i < 3000 {
+			other.Add(intToBytes(i))
+		}
+	}
+
+	for i := uint64(100001); i < 101000; i++ {
+		other.Add(intToBytes(i))
+	}
+
+	err = h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := estimateError(h.Count(), 101000); e > 0.01 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 101000, e)
+	}
+
+	// both are dense
+	for i := uint64(0); i < 150000; i++ {
+		other.Add(intToBytes(i))
+	}
+
+	err = h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := estimateError(h.Count(), 150000); e > 0.01 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 150000, e)
+	}
+
+	// we are sparse, other is dense
+	h = New()
+	for i := uint64(149000); i < 151000; i++ {
+		h.Add(intToBytes(i))
+	}
+
+	err = h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := estimateError(h.Count(), 151000); e > 0.01 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 151000, e)
+	}
+
+	other, err = NewWithConfig(Config{
+		Precision: 15,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = h.Merge(other)
+	if err == nil {
+		t.Error("Expecting error about mismatched parameters")
+	}
+}
+
 func TestBitsPerRegister(t *testing.T) {
 	h := New()
 
@@ -106,7 +199,7 @@ func TestBitsPerRegister(t *testing.T) {
 		h.Add(intToBytes(i))
 	}
 
-	if e := estimateError(h.Count(), 100000); e > 0.015 {
+	if e := estimateError(h.Count(), 100000); e > 0.01 {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
 	}
 
@@ -116,7 +209,7 @@ func TestBitsPerRegister(t *testing.T) {
 
 	// this uint64's big-endian sha1 has rho > 31
 	h.Add(intToBytes(3357697204))
-	if e := estimateError(h.Count(), 100001); e > 0.015 {
+	if e := estimateError(h.Count(), 100001); e > 0.01 {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
 	}
 
@@ -133,7 +226,7 @@ func TestBitsPerRegister(t *testing.T) {
 		h.Add(intToBytes(i))
 	}
 
-	if e := estimateError(h.Count(), 100001); e > 0.015 {
+	if e := estimateError(h.Count(), 100001); e > 0.01 {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
 	}
 

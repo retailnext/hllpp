@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"hash"
 	"math"
-	"sort"
 )
 
 // HLLPP represents a single HyperLogLog++ estimator. Create one via New().
@@ -146,28 +145,26 @@ func (h *HLLPP) Add(v []byte) {
 		// is tmpSet >= 1/4 of memory limit?
 		if 4*uint32(len(h.tmpSet))*8 >= 6*h.m/4 {
 			h.flushTmpSet()
-
-			// is sparse data bigger than dense data would be?
-			if uint32(len(h.data))*8 >= 6*h.m {
-				h.toNormal()
-			}
 		}
 	} else {
 		idx := uint32(sliceBits64(x, 63, 64-h.p))
 		rho := rho(x<<h.p | 1<<(h.p-1))
+		h.updateRegisterIfBigger(idx, rho)
+	}
+}
 
-		if rho > 31 && h.bitsPerRegister == 5 {
-			h.bitsPerRegister = 6
-			newData := make([]byte, h.m*h.bitsPerRegister/8)
-			for i := uint32(0); i < h.m; i++ {
-				setRegister(newData, 6, i, getRegister(h.data, 5, i))
-			}
-			h.data = newData
+func (h *HLLPP) updateRegisterIfBigger(idx uint32, rho uint8) {
+	if rho > 31 && h.bitsPerRegister == 5 {
+		h.bitsPerRegister = 6
+		newData := make([]byte, h.m*h.bitsPerRegister/8)
+		for i := uint32(0); i < h.m; i++ {
+			setRegister(newData, 6, i, getRegister(h.data, 5, i))
 		}
+		h.data = newData
+	}
 
-		if rho > getRegister(h.data, h.bitsPerRegister, idx) {
-			setRegister(h.data, h.bitsPerRegister, idx, rho)
-		}
+	if rho > getRegister(h.data, h.bitsPerRegister, idx) {
+		setRegister(h.data, h.bitsPerRegister, idx, rho)
 	}
 }
 
@@ -206,57 +203,77 @@ func (h *HLLPP) Count() uint64 {
 	return uint64(est + 0.5)
 }
 
-func (h *HLLPP) estimateBias(e float64) float64 {
-	estimates := rawEstimateData[h.p-4]
-	biases := biasData[h.p-4]
-
-	index := sort.SearchFloat64s(estimates, e)
-
-	if index == 0 {
-		return biases[0]
-	} else if index == len(estimates) {
-		return biases[len(biases)-1]
+// Merge turns h into the union of h and other. h and other must have the same
+// p, p', and hasher values.
+func (h *HLLPP) Merge(other *HLLPP) error {
+	if h.p != other.p || h.pp != other.pp || h.defaultHasher != other.defaultHasher {
+		return errors.New("HLLPPs have different parameters")
 	}
 
-	e1, e2 := estimates[index-1], estimates[index]
-	b1, b2 := biases[index-1], biases[index]
+	if h.sparse && !other.sparse {
+		h.toNormal()
+	}
 
-	r := (e - e1) / (e2 - e1)
-	return b1*(1-r) + b2*r
+	if other.sparse {
+		other.flushTmpSet()
+	}
+
+	if h.sparse && other.sparse {
+		tmpSet := make([]uint32, other.sparseLength)
+		reader := newSparseReader(other.data)
+		for index := 0; !reader.Done(); index++ {
+			tmpSet[index] = reader.Next()
+		}
+		h.mergeSparse(tmpSet)
+	} else if !h.sparse && !other.sparse {
+		for i := uint32(0); i < h.m; i++ {
+			rho := getRegister(other.data, other.bitsPerRegister, i)
+			h.updateRegisterIfBigger(i, rho)
+		}
+	} else {
+		reader := newSparseReader(other.data)
+		for !reader.Done() {
+			idx, rho := other.decodeHash(reader.Next(), other.p)
+			h.updateRegisterIfBigger(idx, rho)
+		}
+	}
+
+	return nil
+}
+
+func (h *HLLPP) toNormal() {
+	if !h.sparse {
+		return
+	}
+
+	if h.bitsPerRegister == 0 {
+		h.bitsPerRegister = 5
+	}
+
+	newData := make([]byte, h.m*h.bitsPerRegister/8)
+
+	reader := newSparseReader(h.data)
+	for !reader.Done() {
+		idx, rho := h.decodeHash(reader.Next(), h.p)
+
+		if rho > 31 && h.bitsPerRegister == 5 {
+			h.bitsPerRegister = 6
+			h.toNormal()
+			return
+		}
+
+		if rho > getRegister(newData, h.bitsPerRegister, idx) {
+			setRegister(newData, h.bitsPerRegister, idx, rho)
+		}
+	}
+
+	h.data = newData
+	h.tmpSet = nil
+	h.sparse = false
 }
 
 func linearCounting(m, v uint32) uint64 {
 	return uint64(float64(m)*math.Log(float64(m)/float64(v)) + 0.5)
-}
-
-func (h *HLLPP) encodeHash(x uint64) uint32 {
-	if sliceBits64(x, 63-h.p, 64-h.pp) == 0 {
-		r := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | (1<<h.pp - 1))
-		return uint32(sliceBits64(x, 63, 64-h.pp)<<7 | uint64(r<<1) | 1)
-	}
-
-	return uint32(sliceBits64(x, 63, 64-h.pp) << 1)
-}
-
-// Return index with respect to "p" arg, and rho with respect to h.p. This is so
-// the h.pp index can be recovered easily when flushing the tmpSet.
-func (h *HLLPP) decodeHash(k uint32, p uint8) (_ uint32, r uint8) {
-	if k&1 > 0 {
-		r = uint8(sliceBits32(k, 6, 1)) + (h.pp - h.p)
-	} else {
-		r = rho((uint64(k) | 1) << (64 - (h.pp + 1) + h.p))
-	}
-
-	return h.getIndex(k, p), r
-}
-
-// Return index with respect to precision "p".
-func (h *HLLPP) getIndex(k uint32, p uint8) uint32 {
-	if k&1 > 0 {
-		return sliceBits32(k, 6+h.pp, 1+6+h.pp-p)
-	} else {
-		return sliceBits32(k, h.pp, 1+h.pp-p)
-	}
 }
 
 // slice out inclusive bit section [x.high..x.low]

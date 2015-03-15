@@ -134,6 +134,11 @@ func (h *HLLPP) flushTmpSet() {
 	}
 
 	sort.Sort(h.tmpSet)
+	h.mergeSparse(h.tmpSet)
+	h.tmpSet = nil
+}
+
+func (h *HLLPP) mergeSparse(tmpSet []uint32) {
 
 	iter := newSparseReader(h.data)
 	writer := newSparseWriter()
@@ -142,10 +147,10 @@ func (h *HLLPP) flushTmpSet() {
 
 	// deduping by index and choosing biggest rho is handled in the writer
 
-	for !iter.Done() || tmpI < len(h.tmpSet) {
+	for !iter.Done() || tmpI < len(tmpSet) {
 		if iter.Done() {
-			idx, rho := h.decodeHash(h.tmpSet[tmpI], h.pp)
-			writer.Append(h.tmpSet[tmpI], idx, rho)
+			idx, rho := h.decodeHash(tmpSet[tmpI], h.pp)
+			writer.Append(tmpSet[tmpI], idx, rho)
 			tmpI++
 			continue
 		}
@@ -153,13 +158,13 @@ func (h *HLLPP) flushTmpSet() {
 		sparseVal := iter.Peek()
 		sparseIdx, sparseR := h.decodeHash(sparseVal, h.pp)
 
-		if tmpI == len(h.tmpSet) {
+		if tmpI == len(tmpSet) {
 			writer.Append(sparseVal, sparseIdx, sparseR)
 			iter.Advance()
 			continue
 		}
 
-		tmpVal := h.tmpSet[tmpI]
+		tmpVal := tmpSet[tmpI]
 		tmpIdx, tmpR := h.decodeHash(tmpVal, h.pp)
 
 		if sparseIdx < tmpIdx {
@@ -181,5 +186,39 @@ func (h *HLLPP) flushTmpSet() {
 
 	h.data = writer.Bytes()
 	h.sparseLength = writer.Len()
-	h.tmpSet = nil
+
+	// is sparse data bigger than dense data would be?
+	if uint32(len(h.data))*8 >= 6*h.m {
+		h.toNormal()
+	}
+}
+
+func (h *HLLPP) encodeHash(x uint64) uint32 {
+	if sliceBits64(x, 63-h.p, 64-h.pp) == 0 {
+		r := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | (1<<h.pp - 1))
+		return uint32(sliceBits64(x, 63, 64-h.pp)<<7 | uint64(r<<1) | 1)
+	}
+
+	return uint32(sliceBits64(x, 63, 64-h.pp) << 1)
+}
+
+// Return index with respect to "p" arg, and rho with respect to h.p. This is so
+// the h.pp index can be recovered easily when flushing the tmpSet.
+func (h *HLLPP) decodeHash(k uint32, p uint8) (_ uint32, r uint8) {
+	if k&1 > 0 {
+		r = uint8(sliceBits32(k, 6, 1)) + (h.pp - h.p)
+	} else {
+		r = rho((uint64(k) | 1) << (64 - (h.pp + 1) + h.p))
+	}
+
+	return h.getIndex(k, p), r
+}
+
+// Return index with respect to precision "p".
+func (h *HLLPP) getIndex(k uint32, p uint8) uint32 {
+	if k&1 > 0 {
+		return sliceBits32(k, 6+h.pp, 1+6+h.pp-p)
+	} else {
+		return sliceBits32(k, h.pp, 1+h.pp-p)
+	}
 }

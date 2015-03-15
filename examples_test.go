@@ -54,3 +54,21 @@ func ExampleHLLPP_Marshal() {
 	fmt.Println(h.Count())
 	// Output: 1
 }
+
+func ExampleHLLPP_Merge() {
+	h := New()
+	h.Add([]byte("picard"))
+	h.Add([]byte("janeway"))
+
+	other := New()
+	other.Add([]byte("picard"))
+	other.Add([]byte("kirk"))
+
+	err := h.Merge(other)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(h.Count())
+	// Output: 3
+}
