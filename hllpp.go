@@ -79,7 +79,7 @@ type hashWrapper struct {
 	buf []byte
 }
 
-func (w hashWrapper) Sum64() uint64 {
+func (w *hashWrapper) Sum64() uint64 {
 	w.buf = w.Sum(w.buf[0:0])
 	return binary.BigEndian.Uint64(w.buf)
 }
@@ -103,7 +103,7 @@ func NewWithConfig(c Config) (*HLLPP, error) {
 	if v, ok := c.Hasher.(hash.Hash64); ok {
 		hasher = v
 	} else {
-		hasher = hashWrapper{Hash: c.Hasher}
+		hasher = &hashWrapper{Hash: c.Hasher}
 	}
 
 	return &HLLPP{
@@ -193,9 +193,11 @@ func setRegister(data []byte, bitsPerRegister, idx uint32, rho uint8) {
 	if 8-bitOffset >= bitsPerRegister {
 		// can all fit in first byte
 
+		leftShift := 8 - bitsPerRegister - bitOffset
+
 		// clear existing register value
-		data[byteOffset] &= ^byte(mask(bitsPerRegister, 8-bitsPerRegister-bitOffset))
-		data[byteOffset] |= rho << (8 - bitsPerRegister - bitOffset)
+		data[byteOffset] &= ^byte(mask(bitsPerRegister, leftShift))
+		data[byteOffset] |= rho << leftShift
 	} else {
 		// spread over two bytes
 
@@ -301,11 +303,11 @@ func linearCounting(m, v uint32) uint64 {
 
 func (h *HLLPP) encodeHash(x uint64) uint32 {
 	if sliceBits64(x, 63-h.p, 64-h.pp) == 0 {
-		numZeros := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | uint64(mask(uint32(h.pp), 0)))
-		return uint32((sliceBits64(x, 63, 64-h.pp) << 7) | uint64(numZeros<<1) | 1)
-	} else {
-		return uint32(sliceBits64(x, 63, 64-h.pp) << 1)
+		r := rho((sliceBits64(x, 63-h.pp, 0) << h.pp) | (1<<h.pp - 1))
+		return uint32(sliceBits64(x, 63, 64-h.pp)<<7 | uint64(r<<1) | 1)
 	}
+
+	return uint32(sliceBits64(x, 63, 64-h.pp) << 1)
 }
 
 // Return index with respect to "p" arg, and rho with respect to h.p. This is so
