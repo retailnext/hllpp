@@ -15,6 +15,9 @@ import (
 
 var p14NormalSize = (1 << 14) * 6 / 8
 
+// this uint64's big-endian murmur3 has rho > 31
+const murmurRho32 uint64 = 3395916422
+
 func intToBytes(i uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, i)
@@ -164,6 +167,22 @@ func TestMerge(t *testing.T) {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 150000, e)
 	}
 
+	// both dense, but we need to be converted to 6 bits per register
+	other.Add(intToBytes(murmurRho32))
+
+	err = h.Merge(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := estimateError(h.Count(), 150001); e > 0.01 {
+		t.Errorf("Got %d, expected %d (%f)", h.Count(), 150000, e)
+	}
+
+	if uint32(len(h.data)) != 6*h.m/8 {
+		t.Errorf("Expecting 6 bits per register")
+	}
+
 	// we are sparse, other is dense
 	h = New()
 	for i := uint64(149000); i < 151000; i++ {
@@ -207,8 +226,7 @@ func TestBitsPerRegister(t *testing.T) {
 		t.Errorf("Expecting 5 bits per register")
 	}
 
-	// this uint64's big-endian murmur3 has rho > 31
-	h.Add(intToBytes(3395916422))
+	h.Add(intToBytes(murmurRho32))
 	if e := estimateError(h.Count(), 100001); e > 0.01 {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
 	}
@@ -220,7 +238,7 @@ func TestBitsPerRegister(t *testing.T) {
 	// test sparse to normal transition when sparse has > 31 rho in it
 	h = New()
 
-	h.Add(intToBytes(3395916422))
+	h.Add(intToBytes(murmurRho32))
 
 	for i := uint64(1); i < 100000; i++ {
 		h.Add(intToBytes(i))
