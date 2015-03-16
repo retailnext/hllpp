@@ -6,6 +6,7 @@ hllpp is an implementation of the HyperLogLog++ cardinality estimation algorithm
 
 * marshaling so you can serialize to your datastore
 * extra space savings by only using 5 bits per register when possible
+* built-in non-streaming murmur3 implementation for fast hashing of input data
 
 ## Usage
 
