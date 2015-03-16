@@ -4,17 +4,12 @@
 package hllpp
 
 import (
-	"crypto/md5"
-	"crypto/sha1"
 	"fmt"
 	"reflect"
 	"testing"
 )
 
 func hllpEqual(h1, h2 HLLPP) bool {
-	h1.hasher = nil
-	h2.hasher = nil
-
 	return reflect.DeepEqual(h1, h2)
 }
 
@@ -91,37 +86,5 @@ func TestUnmarshalErrors(t *testing.T) {
 	uh, err = Unmarshal(h.Marshal()[0:100])
 	if uh != nil || err == nil {
 		t.Error("Expected nil hll and some error")
-	}
-}
-
-func TestMarshalHasher(t *testing.T) {
-	h := New()
-
-	uh, err := UnmarshalWithHasher(h.Marshal(), sha1.New())
-	if err == nil {
-		t.Error("Expected error about hasher")
-	}
-
-	h, err = NewWithConfig(Config{
-		Hasher:          md5.New(),
-		Precision:       12,
-		SparsePrecision: 20,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	uh, err = Unmarshal(h.Marshal())
-	if err == nil {
-		t.Error("Expected error about hasher")
-	}
-
-	uh, err = UnmarshalWithHasher(h.Marshal(), md5.New())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !hllpEqual(*h, *uh) {
-		t.Errorf("Expected %+v, got %+v", *h, *uh)
 	}
 }

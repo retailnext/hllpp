@@ -207,8 +207,8 @@ func TestBitsPerRegister(t *testing.T) {
 		t.Errorf("Expecting 5 bits per register")
 	}
 
-	// this uint64's big-endian sha1 has rho > 31
-	h.Add(intToBytes(3357697204))
+	// this uint64's big-endian murmur3 has rho > 31
+	h.Add(intToBytes(3395916422))
 	if e := estimateError(h.Count(), 100001); e > 0.01 {
 		t.Errorf("Got %d, expected %d (%f)", h.Count(), 100000, e)
 	}
@@ -220,7 +220,7 @@ func TestBitsPerRegister(t *testing.T) {
 	// test sparse to normal transition when sparse has > 31 rho in it
 	h = New()
 
-	h.Add(intToBytes(3357697204))
+	h.Add(intToBytes(3395916422))
 
 	for i := uint64(1); i < 100000; i++ {
 		h.Add(intToBytes(i))

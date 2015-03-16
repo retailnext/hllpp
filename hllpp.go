@@ -2,15 +2,15 @@
 // All rights reserved.
 
 // hllpp implements the HyperLogLog++ cardinality estimator as specified
-// in http://goo.gl/Z5Sqgu.
+// in the HyperLogLog++ paper http://goo.gl/Z5Sqgu. hllpp uses a built-in
+// non-streaming implementation of murmur3 to hash data as you add it to
+// the estimator. Currently big-endian architectures are not supported.
+// hllpp will panic when imported on big-endian architectures.
 package hllpp
 
 import (
-	"crypto/sha1"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash"
 	"math"
 )
 
@@ -36,18 +36,14 @@ type HLLPP struct {
 	// p' and m'
 	pp uint8
 	mp uint32
-
-	hasher        hash.Hash64
-	defaultHasher bool
 }
 
 // Approximate size in bytes of h (used for testing).
 func (h *HLLPP) memSize() int {
-	return cap(h.data) + 4*cap(h.tmpSet) + 24
+	return cap(h.data) + 4*cap(h.tmpSet) + 20
 }
 
-// New creates a HyperLogLog++ estimator with p=14, p'=25, and sha1
-// hashing function.
+// New creates a HyperLogLog++ estimator with p=14, p'=25.
 func New() *HLLPP {
 	h, err := NewWithConfig(Config{})
 	if err != nil {
@@ -59,11 +55,6 @@ func New() *HLLPP {
 // Config is used to set configurable fields on a HyperLogLog++ via
 // NewWithConfig.
 type Config struct {
-	// Hashing function to apply in Add(). If Hasher implements hash.Hash64,
-	// Sum64() will be used, otherwise Sum() will be used. Hasher's BlockSize
-	// must be at least 8. Defaults to sha1.
-	Hasher hash.Hash
-
 	// Precision (p). Must be in the range [4..16]. This value can be used
 	// to adjust the average error of the estimate. Space requirements grow
 	// exponentially as this value is increased. Defaults to 14, the recommended
@@ -79,17 +70,6 @@ type Config struct {
 	SparsePrecision uint8
 }
 
-// wraps a hash.Hash and implements hash.Hash64 on top of it
-type hashWrapper struct {
-	hash.Hash
-	buf []byte
-}
-
-func (w *hashWrapper) Sum64() uint64 {
-	w.buf = w.Sum(w.buf[0:0])
-	return binary.BigEndian.Uint64(w.buf)
-}
-
 // NewWithConfig creates a HyperLogLog++ estimator with the given Config.
 func NewWithConfig(c Config) (*HLLPP, error) {
 	if c.Precision == 0 {
@@ -100,44 +80,24 @@ func NewWithConfig(c Config) (*HLLPP, error) {
 		c.SparsePrecision = 25
 	}
 
-	defaultHasher := false
-	if c.Hasher == nil {
-		defaultHasher = true
-		c.Hasher = sha1.New()
-	}
-
 	p, pp := c.Precision, c.SparsePrecision
 	if p < 4 || p > 16 || pp < p || pp > 25 {
 		return nil, fmt.Errorf("invalid precision (p: %d, p': %d)", p, pp)
 	}
 
-	if c.Hasher.Size() < 8 {
-		return nil, errors.New("Hasher.Size() is less than 8, pick something else")
-	}
-
-	var hasher hash.Hash64
-	if v, ok := c.Hasher.(hash.Hash64); ok {
-		hasher = v
-	} else {
-		hasher = &hashWrapper{Hash: c.Hasher}
-	}
-
 	return &HLLPP{
-		p:             p,
-		pp:            pp,
-		m:             1 << p,
-		mp:            1 << pp,
-		sparse:        true,
-		hasher:        hasher,
-		defaultHasher: defaultHasher,
+		p:      p,
+		pp:     pp,
+		m:      1 << p,
+		mp:     1 << pp,
+		sparse: true,
 	}, nil
 }
 
-// Add will hash v and add the result to the HyperLogLog++ estimator h.
+// Add will hash v and add the result to the HyperLogLog++ estimator h. hllpp
+// uses a built-in non-streaming implementation of murmur3.
 func (h *HLLPP) Add(v []byte) {
-	h.hasher.Reset()
-	h.hasher.Write(v)
-	x := h.hasher.Sum64()
+	x := murmurSum64(v)
 
 	if h.sparse {
 		h.tmpSet = append(h.tmpSet, h.encodeHash(x))
@@ -204,9 +164,9 @@ func (h *HLLPP) Count() uint64 {
 }
 
 // Merge turns h into the union of h and other. h and other must have the same
-// p, p', and hasher values.
+// p and p' values.
 func (h *HLLPP) Merge(other *HLLPP) error {
-	if h.p != other.p || h.pp != other.pp || h.defaultHasher != other.defaultHasher {
+	if h.p != other.p || h.pp != other.pp {
 		return errors.New("HLLPPs have different parameters")
 	}
 

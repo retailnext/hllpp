@@ -5,11 +5,7 @@ package hllpp
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"hash"
-
-	"crypto/sha1"
 )
 
 /*
@@ -33,14 +29,12 @@ const (
 	marshalVersion    = 1
 	marshalHeaderSize = 15
 
-	marshalFlagSparse        = 1
-	marshalFlagDefaultHasher = 2
+	marshalFlagSparse = 1
 )
 
 // Marshal serializes h into a byte slice that can be deserialized via
 // Unmarshal. The data is naturally compressed, so don't bother trying
-// to compress it any more. If you created your HLLPP via NewWithConfig,
-// you must unmarshal using UnmarshalWithHasher.
+// to compress it any more.
 func (h *HLLPP) Marshal() []byte {
 	if h.sparse {
 		h.flushTmpSet()
@@ -59,9 +53,6 @@ func (h *HLLPP) Marshal() []byte {
 	var flags uint16
 	if h.sparse {
 		flags |= marshalFlagSparse
-	}
-	if h.defaultHasher {
-		flags |= marshalFlagDefaultHasher
 	}
 
 	binary.BigEndian.PutUint16(buf[offset:], flags)
@@ -87,35 +78,6 @@ func (h *HLLPP) Marshal() []byte {
 // Unmarshal deserializes a byte slice returned by Marshal back into an
 // HLLPP object.
 func Unmarshal(data []byte) (*HLLPP, error) {
-	h, err := unmarshal(data, sha1.New())
-	if err != nil {
-		return nil, err
-	}
-
-	if !h.defaultHasher {
-		return nil, errors.New("must unmarshal using UnmarshalWithHasher")
-	}
-
-	return h, nil
-}
-
-// UnmarshalWithHasher deserializes a byte slice returned by Marshal back into
-// an HLLPP object with a custom hasher. You must use this method if you
-// specified a customer hasher when creating your HLLPP object.
-func UnmarshalWithHasher(data []byte, hasher hash.Hash) (*HLLPP, error) {
-	h, err := unmarshal(data, hasher)
-	if err != nil {
-		return nil, err
-	}
-
-	if h.defaultHasher {
-		return nil, errors.New("must unmarshal using Unmarshal")
-	}
-
-	return h, nil
-}
-
-func unmarshal(data []byte, hasher hash.Hash) (*HLLPP, error) {
 	if len(data) < marshalHeaderSize {
 		return nil, fmt.Errorf("data too short (%d bytes)", len(data))
 	}
@@ -148,14 +110,12 @@ func unmarshal(data []byte, hasher hash.Hash) (*HLLPP, error) {
 	h, err := NewWithConfig(Config{
 		Precision:       p,
 		SparsePrecision: pp,
-		Hasher:          hasher,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	h.sparse = flags&marshalFlagSparse > 0
-	h.defaultHasher = flags&marshalFlagDefaultHasher > 0
 
 	h.sparseLength = binary.BigEndian.Uint32(data[offset:])
 	offset += 4

@@ -6,10 +6,7 @@
 // All rights reserved.
 package hllpp
 
-import (
-	"crypto/md5"
-	"fmt"
-)
+import "fmt"
 
 func Example() {
 	h := New()
@@ -27,7 +24,6 @@ func ExampleNewWithConfig() {
 	h, err := NewWithConfig(Config{
 		Precision:       12,
 		SparsePrecision: 14,
-		Hasher:          md5.New(),
 	})
 	if err != nil {
 		panic(err)
