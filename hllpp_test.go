@@ -280,7 +280,7 @@ func uint64ToBits(i uint64) string {
 }
 
 func TestEncodeDecodeHash(t *testing.T) {
-	h := New()
+	h, _ := NewWithConfig(Config{SparsePrecision: 25})
 
 	// p is 14, p' is 25
 
@@ -414,6 +414,47 @@ func TestEncodeDecodeHash(t *testing.T) {
 	}
 
 	if r != 33 {
+		t.Errorf("got %d", r)
+	}
+
+	// sanity check a different p' value
+	h, _ = NewWithConfig(Config{SparsePrecision: 20})
+
+	//                              p      p'
+	x = bitsToUint64("11111111 00000000 11111111 00000000 11111111 11111111 11111111 11111111")
+	e = h.encodeHash(x)
+
+	// don't need to encode number of zeros
+	if e != bitsToUint32("11111111 00000000 1111 0") {
+		t.Errorf("got %s", uint32ToBits(e))
+	}
+
+	i, r = h.decodeHash(e, h.p)
+
+	if i != bitsToUint32("11111111 000000") {
+		t.Errorf("got %s", uint32ToBits(i))
+	}
+
+	if r != 3 {
+		t.Errorf("got %d", r)
+	}
+
+	//                              p      p'
+	x = bitsToUint64("11111111 00000000 00000111 00000000 11111111 11111111 11111111 11111111")
+	e = h.encodeHash(x)
+
+	// need to encode number of zeros
+	if e != bitsToUint32("11111111 00000000 0000 000010 1") {
+		t.Errorf("got %s", uint32ToBits(e))
+	}
+
+	i, r = h.decodeHash(e, h.p)
+
+	if i != bitsToUint32("11111111 000000") {
+		t.Errorf("got %s", uint32ToBits(i))
+	}
+
+	if r != 8 {
 		t.Errorf("got %d", r)
 	}
 }

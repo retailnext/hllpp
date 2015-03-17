@@ -43,7 +43,7 @@ func (h *HLLPP) memSize() int {
 	return cap(h.data) + 4*cap(h.tmpSet) + 20
 }
 
-// New creates a HyperLogLog++ estimator with p=14, p'=25.
+// New creates a HyperLogLog++ estimator with p=14, p'=20.
 func New() *HLLPP {
 	h, err := NewWithConfig(Config{})
 	if err != nil {
@@ -56,17 +56,19 @@ func New() *HLLPP {
 // NewWithConfig.
 type Config struct {
 	// Precision (p). Must be in the range [4..16]. This value can be used
-	// to adjust the average error of the estimate. Space requirements grow
-	// exponentially as this value is increased. Defaults to 14, the recommended
-	// value.
+	// to adjust the typical relative error of the estimate. Space requirements
+	// grow exponentially as this value is increased. Defaults to 14, the
+	// recommended value, which gives an expected error of about 0.8%
 	Precision uint8
 
 	// Precision in sparse mode (p'). Must be in the range [p..25] for this
-	// implementation. This value can be used to adjust the average error
-	// of the estimate when using the sparse representation. Lowering it
-	// will allow the estimator to remain in sparse mode longer, but will
-	// increase the average error. The HyperLogLog++ paper recommends 20
-	// or 25. Defaults to 25.
+	// implementation. This value can be used to adjust the typical relative
+	// error of the estimate when using the sparse representation (typically
+	// for cardinalities below 8000 at p'=20). Lowering p' will allow the
+	// estimator to remain in sparse mode longer, but will increase the relative
+	// error. The HyperLogLog++ paper recommends 20 or 25. Defaults to 20 since
+	// that still gives you a much lower error vs. p=14, but saves a signficant
+	// amount of space vs. p'=25 (20-25% for cardinalities less than 5000).
 	SparsePrecision uint8
 }
 
@@ -77,7 +79,7 @@ func NewWithConfig(c Config) (*HLLPP, error) {
 	}
 
 	if c.SparsePrecision == 0 {
-		c.SparsePrecision = 25
+		c.SparsePrecision = 20
 	}
 
 	p, pp := c.Precision, c.SparsePrecision
