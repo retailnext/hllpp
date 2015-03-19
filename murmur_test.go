@@ -170,6 +170,14 @@ func TestMurmur(t *testing.T) {
 			t.Errorf("#%d: got %d, expected %d", i, sum, c.expected)
 		}
 	}
+
+	bigEndian = !bigEndian
+	defer func() { bigEndian = !bigEndian }()
+	for i, c := range cases {
+		if sum := murmurSum64(c.input); sum != c.expected {
+			t.Errorf("#%d: got %d, expected %d", i, sum, c.expected)
+		}
+	}
 }
 
 func BenchmarkMurmurSmall(b *testing.B) {
@@ -201,5 +209,6 @@ func BenchmarkSHA1(b *testing.B) {
 		h.Write(data)
 		tmp = h.Sum(tmp[0:0])
 		_ = binary.BigEndian.Uint64(tmp)
+		h.Reset()
 	}
 }

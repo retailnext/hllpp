@@ -4,8 +4,7 @@
 // hllpp implements the HyperLogLog++ cardinality estimator as specified
 // in the HyperLogLog++ paper http://goo.gl/Z5Sqgu. hllpp uses a built-in
 // non-streaming implementation of murmur3 to hash data as you add it to
-// the estimator. Currently big-endian architectures are not supported.
-// hllpp will panic when imported on big-endian architectures.
+// the estimator.
 package hllpp
 
 import (

@@ -4,6 +4,7 @@
 package hllpp
 
 import (
+	"encoding/binary"
 	"reflect"
 	"unsafe"
 )
@@ -12,22 +13,19 @@ import (
 // vs cryptographic hashing functions, but I can avoid memory allocations by
 // not using the go streaming hash.Hash interface.
 
-// Currently this only works on little-endian architectures. It will panic if
-// you try to use it on big-endian. "unsafe" pointer naughtiness is fast, but
-// not portable.
-
 const (
 	murmurC1 = 0x87c37b91114253d5
 	murmurC2 = 0x4cf5ad432745937f
 )
 
+var bigEndian bool
+
 func init() {
 	var t uint16 = 1
-	if (*[2]byte)(unsafe.Pointer(&t))[0] == 0 {
-		panic("big-endian not currently supported")
-	}
+	bigEndian = (*[2]byte)(unsafe.Pointer(&t))[0] == 0
 }
 
+// This is a port of MurmurHash3_x64_128 from MurmurHash3.cpp
 func murmurSum64(data []byte) uint64 {
 	var h1, h2, k1, k2 uint64
 
@@ -35,13 +33,20 @@ func murmurSum64(data []byte) uint64 {
 
 	nBlocks := len / 16
 
-	dataHeader := (*reflect.SliceHeader)(unsafe.Pointer(&data))
-
 	var data64 []uint64
-	data64Header := (*reflect.SliceHeader)(unsafe.Pointer(&data64))
-	data64Header.Data = dataHeader.Data
-	data64Header.Len = 2 * nBlocks
-	data64Header.Cap = 2 * nBlocks
+
+	if bigEndian {
+		data64 = make([]uint64, nBlocks*2)
+		for i := 0; i < nBlocks*2; i++ {
+			data64[i] = binary.LittleEndian.Uint64(data[8*i:])
+		}
+	} else {
+		dataHeader := (*reflect.SliceHeader)(unsafe.Pointer(&data))
+		data64Header := (*reflect.SliceHeader)(unsafe.Pointer(&data64))
+		data64Header.Data = dataHeader.Data
+		data64Header.Len = 2 * nBlocks
+		data64Header.Cap = 2 * nBlocks
+	}
 
 	for i := 0; i < nBlocks; i++ {
 		k1 = data64[2*i]
