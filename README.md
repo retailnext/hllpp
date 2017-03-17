@@ -21,3 +21,7 @@ hllpp is an implementation of the HyperLogLog++ cardinality estimation algorithm
     // Output: 3
 
 See the godocs for documentation and more examples.
+
+### SEO
+
+This package is a go or golang implementation of HyperLogLog or HyperLogLog++. It doesn't show up when you search for golang hyperloglog, so I am repeating the words golang hyperloglog in the README. golang hyperloglog.
