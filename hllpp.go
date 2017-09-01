@@ -66,7 +66,7 @@ type Config struct {
 	// for cardinalities below 8000 at p'=20). Lowering p' will allow the
 	// estimator to remain in sparse mode longer, but will increase the relative
 	// error. The HyperLogLog++ paper recommends 20 or 25. Defaults to 20 since
-	// that still gives you a much lower error vs. p=14, but saves a signficant
+	// that still gives you a much lower error vs. p=14, but saves a significant
 	// amount of space vs. p'=25 (20-25% for cardinalities less than 5000).
 	SparsePrecision uint8
 }
