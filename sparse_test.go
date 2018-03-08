@@ -1,10 +1,12 @@
-// Copyright (c) 2015, RetailNext, Inc.
+// Copyright (c) 2018, RetailNext, Inc.
 // All rights reserved.
 
 package hllpp
 
 import (
+	"math/rand"
 	"testing"
+	"time"
 )
 
 func TestSparseReaderWriter(t *testing.T) {
@@ -67,5 +69,28 @@ func TestSparseReaderWriter(t *testing.T) {
 
 	if !reader.Done() {
 		t.Errorf("should be done")
+	}
+}
+
+func TestSparseMerge(t *testing.T) {
+	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	for i := 0; i < 1000; i++ {
+		v1 := intToBytes(gen.Uint64())
+		v2 := intToBytes(gen.Uint64())
+
+		h := New()
+		h.Add(v1)
+		h.Add(v2)
+
+		other := New()
+		other.Add(v1)
+
+		h.flushTmpSet()
+		h.Merge(other)
+
+		if h.Count() != 2 {
+			t.Fatalf("iter %d got %d", i, h.Count())
+		}
 	}
 }

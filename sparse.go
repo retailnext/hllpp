@@ -1,4 +1,4 @@
-// Copyright (c) 2015, RetailNext, Inc.
+// Copyright (c) 2018, RetailNext, Inc.
 // All rights reserved.
 
 package hllpp
@@ -7,20 +7,6 @@ import (
 	"encoding/binary"
 	"sort"
 )
-
-type uint32Slice []uint32
-
-func (s uint32Slice) Len() int {
-	return len(s)
-}
-
-func (s uint32Slice) Less(i, j int) bool {
-	return s[i] < s[j]
-}
-
-func (s uint32Slice) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
 
 type sparseReader struct {
 	data    []byte
@@ -74,7 +60,7 @@ type sparseWriter struct {
 	currIdx    uint32
 	currRho    uint8
 
-	varIntBuf []byte
+	varIntBuf [binary.MaxVarintLen32]byte
 	length    uint32
 }
 
@@ -101,7 +87,7 @@ func (writer *sparseWriter) Append(k, idx uint32, rho uint8) {
 }
 
 func (writer *sparseWriter) commit() {
-	n := binary.PutUvarint(writer.varIntBuf, uint64(writer.currVal-writer.lastVal))
+	n := binary.PutUvarint(writer.varIntBuf[:], uint64(writer.currVal-writer.lastVal))
 	writer.data = append(writer.data, writer.varIntBuf[:n]...)
 	writer.lastVal = writer.currVal
 	writer.length++
@@ -123,9 +109,7 @@ func (writer *sparseWriter) Len() uint32 {
 }
 
 func newSparseWriter() *sparseWriter {
-	return &sparseWriter{
-		varIntBuf: make([]byte, binary.MaxVarintLen32),
-	}
+	return &sparseWriter{}
 }
 
 func (h *HLLPP) flushTmpSet() {
@@ -133,7 +117,11 @@ func (h *HLLPP) flushTmpSet() {
 		return
 	}
 
-	sort.Sort(h.tmpSet)
+	sort.Slice(h.tmpSet, func(i, j int) bool {
+		iIdx, _ := h.decodeHash(h.tmpSet[i], h.pp)
+		jIdx, _ := h.decodeHash(h.tmpSet[j], h.pp)
+		return iIdx < jIdx
+	})
 	h.mergeSparse(h.tmpSet)
 	h.tmpSet = nil
 }

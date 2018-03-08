@@ -1,4 +1,4 @@
-// Copyright (c) 2015, RetailNext, Inc.
+// Copyright (c) 2018, RetailNext, Inc.
 // All rights reserved.
 
 // hllpp implements the HyperLogLog++ cardinality estimator as specified
@@ -21,7 +21,7 @@ type HLLPP struct {
 	data []byte
 
 	// accumulates unsorted values in sparse mode
-	tmpSet uint32Slice
+	tmpSet []uint32
 
 	sparse       bool
 	sparseLength uint32
